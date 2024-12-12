@@ -41,15 +41,15 @@ MPC::MPC()
 /**
 * @brief MPC class constructor intialize with parameter map
 */
-MPC::MPC(const std::map<string, double> &params)
+MPC::MPC(const std::map<std::string, double> &params)
 {
-
+  _params = params;
 }
 
 /**
 * @brief MPC solver
 */
-void MPC::solve()
+std::vector<double> MPC::solve(Eigen::VectorXd state, Eigen::VectorXd coeffs)
 {
 
 }

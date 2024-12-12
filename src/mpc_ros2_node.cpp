@@ -31,61 +31,79 @@
 #include <nav_msgs/msg/path.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <visualization_msgs/msg/marker.hpp>
+#include "std_msgs/msg/string.hpp"
 
 #include "mpc_ros2/mpc.hpp"
 
 using namespace std::chrono_literals;
 static const rclcpp::Logger LOGGER = rclcpp::get_logger("mpc_ros2");
-
-class MPCRosNode
+namespace MpcRos
 {
+class MPCRosNode : public rclcpp::Node
+{
+  public:
+    MPCRosNode(const rclcpp::NodeOptions& options);
+    rclcpp::node_interfaces::NodeBaseInterface::SharedPtr getNodeBaseInterface();
+    void odomCallback(const nav_msgs::msg::Odometry::ConstPtr& odomMsg);
+    void calculateControl(void);
+
   private:
     int param_a_;
     bool param_b_;
     std::string param_c_;
     size_t param_d_;
 
+    // MPC solver
+    std::map<std::string, double> _mpc_params;
+    MPC _mpc;
+
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr publisher_;
-    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr subscription_;
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr subscription_;
     rclcpp::Node::SharedPtr node_;
 
-  public:
-    MPCRosNode(const rclcpp::NodeOptions& options);
-
+    std::shared_ptr<tf2_ros::TransformListener> tf_listener_{nullptr};
+    std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
 };
 
 MPCRosNode::MPCRosNode(const rclcpp::NodeOptions& options)
-  : node_{ std::make_shared<rclcpp::Node>("mpc_ros2_node", options) }
+  : Node("mpc_ros2_node", options)
 {
   // Controller parameters
   param_a_ = node_->get_parameter("param_a").as_int();
   param_b_ = node_->get_parameter("param_b").as_bool();
-  param_c_ = node_->get_parameter("param_c").as_string();
+  param_c_ = node_->get_parameter("param_c").as_int();
   
   // MPC solver parameters
-  std::map<std::string, double> _mpc_params;
-  _mpc_params["param_a"] = node_->get_parameter("param_a").as_int();
-  _mpc_params["param_b"] = node_->get_parameter("param_b").as_bool();
-  _mpc_params["param_c"] = node_->get_parameter("param_c").as_string();
+  _mpc_params["mpcparam_a"] = node_->get_parameter("mpcparam_a").as_int();
+  _mpc_params["mpcparam_b"] = node_->get_parameter("mpcparam_b").as_bool();
+  _mpc_params["mpcparam_c"] = node_->get_parameter("mpcparam_c").as_int();
+  auto _mpc= std::make_shared<MPC>(_mpc_params);
 
-  // MPC solver
-  MPCRos::MPC(_mpc_params) _mpc;
-  
+  tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
+  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+
   // Publishers and Subscribers
-  subscription_ = this->create_subscription<std_msgs::msg::String>(
-    "topic", 10, std::bind(&MPCRosNode::topic_callback, this, _1));
-  publisher_ = this->create_publisher<std_msgs::msg::String>("topic", 10);
-  timer_ = this->create_wall_timer(500ms, std::bind(&MPCRosNode::timer_callback, this));
+  subscription_ = this->create_subscription<nav_msgs::msg::Odometry>(
+    "topic", 10, std::bind(&MPCRosNode::odomCallback, this, std::placeholders::_1));
+  publisher_ = this->create_publisher<std_msgs::msg::String>("controller_topic", 10);
+  timer_ = this->create_wall_timer(500ms, std::bind(&MPCRosNode::calculateControl, this));
   
 }
 
-void MPCRosNode::topic_callback(const std_msgs::msg::String & msg) const
+rclcpp::node_interfaces::NodeBaseInterface::SharedPtr MPCRosNode::getNodeBaseInterface()
+{
+  return node_->get_node_base_interface();
+}
+
+void MPCRosNode::odomCallback(const nav_msgs::msg::Odometry::ConstPtr& odomMsg)
 {
   geometry_msgs::msg::TransformStamped transformStamped;
+  
+  std::string fromFrameRel = "map";
+  // std::string fromFrameRel = target_frame_.c_str();
+  std::string toFrameRel = "odom";
   try {
-    std::string fromFrameRel = target_frame_.c_str();
-    std::string toFrameRel = "odom";
     rclcpp::Time now = this->get_clock()->now();
     rclcpp::Time when = now - rclcpp::Duration(5, 0);
     transformStamped = tf_buffer_->lookupTransform(
@@ -104,6 +122,13 @@ void MPCRosNode::topic_callback(const std_msgs::msg::String & msg) const
   // RCLCPP_INFO(this->get_logger(), "I heard: '%s'", msg.data.c_str());
 }
 
+void MPCRosNode::calculateControl(void)
+{
+
+}
+
+} // namespace MpcRos
+
 int main(int argc, char** argv)
 {
   rclcpp::init(argc, argv);
@@ -111,7 +136,7 @@ int main(int argc, char** argv)
   rclcpp::NodeOptions options;
   options.automatically_declare_parameters_from_overrides(true);
 
-  auto mpc_ros2_node = std::make_shared<MPCRosNode>(options);
+  auto mpc_ros2_node = std::make_shared<MpcRos::MPCRosNode>(options);
   rclcpp::executors::MultiThreadedExecutor executor;
   
   // Extra thread to handle ROS2 events
@@ -121,7 +146,6 @@ int main(int argc, char** argv)
     executor.remove_node(mpc_ros2_node->getNodeBaseInterface());
   });
 
-  mpc_ros2_node->setup();
   mpc_ros2_node->calculateControl();
 
   spin_thread->join();
