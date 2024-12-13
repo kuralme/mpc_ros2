@@ -25,77 +25,120 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/twist.hpp>
-#include "geometry_msgs/msg/transform_stamped.hpp"
+#include <geometry_msgs/msg/transform_stamped.hpp>
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <tf2_ros/transform_listener.h>
 #include <nav_msgs/msg/path.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <visualization_msgs/msg/marker.hpp>
-#include "std_msgs/msg/string.hpp"
+#include <std_msgs/msg/string.hpp>
 
 #include "mpc_ros2/mpc.hpp"
 
 using namespace std::chrono_literals;
 static const rclcpp::Logger LOGGER = rclcpp::get_logger("mpc_ros2");
+
 namespace MpcRos
 {
+/**
+* @brief MPC Controller ROS2 class
+*        ...
+*/
 class MPCRosNode : public rclcpp::Node
 {
   public:
-    MPCRosNode(const rclcpp::NodeOptions& options);
+    MPCRosNode(const std::string& nodeName, const rclcpp::NodeOptions& options);
     rclcpp::node_interfaces::NodeBaseInterface::SharedPtr getNodeBaseInterface();
     void odomCallback(const nav_msgs::msg::Odometry::ConstPtr& odomMsg);
     void calculateControl(void);
 
-  private:
-    int param_a_;
-    bool param_b_;
-    std::string param_c_;
-    size_t param_d_;
+  private:   
+    // ROS2 node parameters
+    double dt_, w_, throttle_, speed_, maxspeed_, pathLength_, goalRadius_, waypointsDist_;
+    int controlRate_, downSampling_, threadNumbers_;
+    bool goalReceived_, goalReached_, pathComputed_, pubTwistFlag_, debugInfo_, delayMode_;
+    std::string globalPathTopic_, goalTopic_;
+    std::string mapFrame_, odomFrame_, baseFrame_, robotFrame_;
+    std::shared_ptr<tf2_ros::TransformListener> tf_listener_{nullptr};
+    std::unique_ptr<tf2_ros::Buffer> tf_buffer_{nullptr};
+    rclcpp::TimerBase::SharedPtr timer_{nullptr};
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr publisher_{nullptr};
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr subscription_{nullptr};
 
     // MPC solver
-    std::map<std::string, double> _mpc_params;
     MPC _mpc;
-
-    rclcpp::TimerBase::SharedPtr timer_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr publisher_;
-    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr subscription_;
-    rclcpp::Node::SharedPtr node_;
-
-    std::shared_ptr<tf2_ros::TransformListener> tf_listener_{nullptr};
-    std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
+    std::map<std::string, double> _mpc_params;
 };
 
-MPCRosNode::MPCRosNode(const rclcpp::NodeOptions& options)
-  : Node("mpc_ros2_node", options)
+/**
+* @brief MPC Node class constructor
+*        ...
+*/
+MPCRosNode::MPCRosNode(const std::string& nodeName, const rclcpp::NodeOptions& options)
+  : Node(nodeName, options)
 {
-  // Controller parameters
-  param_a_ = node_->get_parameter("param_a").as_int();
-  param_b_ = node_->get_parameter("param_b").as_bool();
-  param_c_ = node_->get_parameter("param_c").as_int();
+  // Get ROS2 parameters from yaml
+  this->get_parameter_or<std::string>("map_frame", mapFrame_, "map");
+  this->get_parameter_or<std::string>("odom_frame", odomFrame_, "odom");
+  this->get_parameter_or<std::string>("base_frame", baseFrame_, "base_link");
+  this->get_parameter_or<int>("control_rate", controlRate_ , 10);
+  this->get_parameter_or<bool>("delay_mode", delayMode_, "false");
+  this->get_parameter_or<bool>("debug_info", debugInfo_, "false");
+
+  std::cout << "======= Loading ROS2 parameters =======" << std::endl;
+  std::cout << "- Map frame name : " << mapFrame_   << std::endl;
+  std::cout << "- Odom frame name: " << odomFrame_  << std::endl;
+  std::cout << "- Base frame name: " << baseFrame_  << std::endl;
+  std::cout << "- Control rate   : " << controlRate_<< std::endl;
+  std::cout << "- Delay mode     : " << delayMode_  << std::endl;
+  std::cout << "- Debug info     : " << debugInfo_  << std::endl;
+
+  // Get MPC solver parameters from yaml
+  double _mpcSteps, _mpcRefCte, _mpcRefVel, _refEtheta, _wCte, _wEtheta, _wVel,
+      _wAngvel, _wAccel, _wAngveld, _wAcceld, _maxAngvel, _maxThrottle, _boundValue;
   
-  // MPC solver parameters
-  _mpc_params["mpcparam_a"] = node_->get_parameter("mpcparam_a").as_int();
-  _mpc_params["mpcparam_b"] = node_->get_parameter("mpcparam_b").as_bool();
-  _mpc_params["mpcparam_c"] = node_->get_parameter("mpcparam_c").as_int();
+  this->get_parameter_or<double>("mpc_steps", _mpcSteps, 0.0);
+  this->get_parameter_or<double>("mpc_ref_cte", _mpcRefCte, 0.0);
+  this->get_parameter_or<double>("mpc_ref_vel", _mpcRefVel, 0.0);
+
+  std::cout << "======= Loading MPC parameters =======" << std::endl;
+  std::cout << "mpc_steps     : " << _mpcSteps << std::endl;
+  std::cout << "mpc_ref_vel   : " << _mpcRefCte << std::endl;
+  std::cout << "mpc_w_cte     : " << _mpcRefVel << std::endl;
+  // std::cout << "mpc_wEtheta  : " << delayMode_ << std::endl;
+  // std::cout << "mpc_max_angvel: " << debugInfo_ << std::endl;
+
+  // Fill MPC solver parameter map
+  _mpc_params["STEPS"]      = _mpcSteps;
+  _mpc_params["REF_CTE"]    = _mpcRefCte;
+  _mpc_params["REF_V"]      = _mpcRefVel;
+  
+  // Construct MPC Solver object
   auto _mpc= std::make_shared<MPC>(_mpc_params);
 
-  tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
-  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
-
-  // Publishers and Subscribers
+  // Create ROS2 Publishers and Subscribers
   subscription_ = this->create_subscription<nav_msgs::msg::Odometry>(
     "topic", 10, std::bind(&MPCRosNode::odomCallback, this, std::placeholders::_1));
   publisher_ = this->create_publisher<std_msgs::msg::String>("controller_topic", 10);
   timer_ = this->create_wall_timer(500ms, std::bind(&MPCRosNode::calculateControl, this));
   
+  tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
+  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 }
 
+/**
+* @brief Node interfacing
+*        Neccessary for multithreaded execution
+*/
 rclcpp::node_interfaces::NodeBaseInterface::SharedPtr MPCRosNode::getNodeBaseInterface()
 {
-  return node_->get_node_base_interface();
+  return this->get_node_base_interface();
 }
 
+/**
+* @brief Odometry ROS2 subscription
+*        ...
+*/
 void MPCRosNode::odomCallback(const nav_msgs::msg::Odometry::ConstPtr& odomMsg)
 {
   geometry_msgs::msg::TransformStamped transformStamped;
@@ -122,6 +165,10 @@ void MPCRosNode::odomCallback(const nav_msgs::msg::Odometry::ConstPtr& odomMsg)
   // RCLCPP_INFO(this->get_logger(), "I heard: '%s'", msg.data.c_str());
 }
 
+/**
+* @brief MPC Controller loop
+*        ...
+*/
 void MPCRosNode::calculateControl(void)
 {
 
@@ -132,12 +179,11 @@ void MPCRosNode::calculateControl(void)
 int main(int argc, char** argv)
 {
   rclcpp::init(argc, argv);
-
   rclcpp::NodeOptions options;
-  options.automatically_declare_parameters_from_overrides(true);
-
-  auto mpc_ros2_node = std::make_shared<MpcRos::MPCRosNode>(options);
   rclcpp::executors::MultiThreadedExecutor executor;
+
+  options.automatically_declare_parameters_from_overrides(true);
+  auto mpc_ros2_node = std::make_shared<MpcRos::MPCRosNode>("mpc_ros2_node", options);
   
   // Extra thread to handle ROS2 events
   auto spin_thread = std::make_unique<std::thread>([&executor, &mpc_ros2_node]() {

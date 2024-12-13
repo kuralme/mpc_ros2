@@ -37,14 +37,12 @@ namespace MpcRos
 {
 class MPC
 {
-  private:
-    std::map<std::string, double> _params;
-
   public:
     MPC();
     MPC(const std::map<std::string, double> &params);
     std::vector<double> solve(Eigen::VectorXd state, Eigen::VectorXd coeffs);
+  private:
+    std::map<std::string, double> _params;
 };
-
 } // namespace MpcRos
 #endif

@@ -30,7 +30,7 @@ ament_target_dependencies(mpc
   tf2_eigen
 )
 
-add_executable(mpc_ros2_node src/mpc_ros2_node.cpp)
+add_executable(mpc_ros2 src/mpc_ros2_node.cpp)
 ament_target_dependencies(mpc 
   rclcpp
   geometry_msgs
@@ -40,7 +40,7 @@ ament_target_dependencies(mpc
   tf2
   tf2_ros
 )
-target_link_libraries(mpc_ros2_node mpc)
+target_link_libraries(mpc_ros2 mpc)
 
 
 install(TARGETS mpc
@@ -49,7 +49,7 @@ install(TARGETS mpc
   RUNTIME DESTINATION bin)
 
 install(TARGETS 
-  mpc_ros2_node
+  mpc_ros2
   DESTINATION lib/${PROJECT_NAME}
 )
 
