@@ -29,6 +29,9 @@
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <tf2_ros/transform_listener.h>
+#include <tf2_ros/buffer.h>
+#include <tf2/LinearMath/Transform.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <visualization_msgs/msg/marker.hpp>
@@ -57,8 +60,9 @@ class MPCRosNode : public rclcpp::Node
 
   private:
     // ROS2 node parameters
+    size_t downSampleRate_ = 10;
     double dt_, maxSpeed_, controlRate_, pathLength_, goalRadius_, waypointsDist_;
-    bool goalReceived_, goalReached_, pathComputed_, pubTwistFlag_, debugInfo_, delayMode_;
+    bool goalReceived_, goalReached_, pathComputed_, debugInfo_, delayMode_;
     std::string odomPath_Otn_, mpcPath_Otn_, glbPath_Itn_, loc_Itn_, goal_Itn_;
     std::string mapFrame_, odomFrame_, robotFrame_;
     geometry_msgs::msg::Point goalPoint_;
@@ -90,6 +94,7 @@ MPCRosNode::MPCRosNode(const std::string& nodeName, const rclcpp::NodeOptions& o
   this->get_parameter_or<std::string>("odom_path_topic", odomPath_Otn_, "odom_path");
   this->get_parameter_or<std::string>("mpc_path_topic", mpcPath_Otn_, "mpc_path");
   this->get_parameter_or<std::string>("robot_frame", robotFrame_, "base_link");
+  this->get_parameter_or<std::string>("odom_frame", odomFrame_, "odom");
   this->get_parameter_or<std::string>("map_frame", mapFrame_, "map");
   this->get_parameter_or<double>("max_speed", maxSpeed_ , .5);
   this->get_parameter_or<double>("path_length", pathLength_ , 8.);
@@ -204,7 +209,6 @@ void MPCRosNode::goalCallback(const geometry_msgs::msg::PoseStamped::ConstPtr& g
   }
 }
 
-
 /**
 * @brief Localization ROS2 subscription
 *        Checks distance to the goal point
@@ -228,12 +232,75 @@ void MPCRosNode::localizationCallback(const geometry_msgs::msg::PoseWithCovarian
 
 /**
 * @brief Global path ROS2 subscription
-*        ...
+*        Downsamples the global path and converts the frames
 */
 void MPCRosNode::glPathCallback(const nav_msgs::msg::Path::ConstPtr& glbPathMsg)
 {
-  const auto globalPath = glbPathMsg->poses;
-  const auto pathFrame = glbPathMsg->header.frame_id;
+  if(goalReceived_ && !goalReached_)
+  {
+    std::cout << "--PathCB--" << std::endl;
+    nav_msgs::msg::Path odomPath;
+    geometry_msgs::msg::TransformStamped tf_path2odom;
+    const auto pathPoses = glbPathMsg->poses;
+    const auto pathFrame = glbPathMsg->header.frame_id;
+    const auto pathSize  = pathPoses.size();
+    double totalLength  = 0.0;
+    double waypointDist = 0.0;
+    size_t sample = 0;
+
+    try {
+      // Check the latest available transform
+      tf_path2odom = tfBuffer_->lookupTransform(odomFrame_, pathFrame, rclcpp::Time(0));
+    } catch (const tf2::TransformException &ex) {
+      RCLCPP_ERROR(
+      this->get_logger(), "Could not transform %s to %s: %s",
+        odomFrame_.c_str(), pathFrame.c_str(), ex.what());
+      return;
+    }
+
+    // Average distance between consecutive waypoints
+    double pathLength = 0.0;
+    for (size_t i = 0; i < pathSize-1; i++) {
+      double dx = pathPoses[i+1].pose.position.x - pathPoses[i].pose.position.x;
+      double dy = pathPoses[i+1].pose.position.y - pathPoses[i].pose.position.y;
+      pathLength += std::hypot(dx, dy);
+    }
+    waypointDist = pathLength / (pathSize-1);
+
+    // Calculate downsampling size
+    const size_t downSampleSize = static_cast<int>
+      (pathLength / (waypointDist * downSampleRate_));
+    
+    // Transform downsampled path's frame to odom frame
+    for (size_t i = 0; i < pathSize; i++)
+    {
+        if (totalLength > pathLength)
+          break;
+
+        if (sample % downSampleSize == 0)
+        {
+          geometry_msgs::msg::PoseStamped waypPose;
+          tf2::doTransform(pathPoses[i], waypPose, tf_path2odom);
+          odomPath.poses.push_back(waypPose);
+        }
+        totalLength += waypointDist;
+        sample++;
+    }
+
+    // Publish the downsampled path if long enough
+    if (odomPath.poses.size() >= 6)
+    {
+      odomPath.header.frame_id = odomFrame_;
+      odomPath.header.stamp = this->get_clock()->now(); // will this match with each pose?
+      pubOdomPath_->publish(odomPath);
+    }
+    else
+    {
+      std::cout << "Failed to downsample the path" << std::endl;
+    }
+    
+    goalReceived_ = false;
+  }
 }
 
 /**
