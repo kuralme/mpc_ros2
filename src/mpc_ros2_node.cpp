@@ -116,7 +116,7 @@ MPCRosNode::MPCRosNode(const std::string& nodeName, const rclcpp::NodeOptions& o
   pathComputed_ = false;
   dt_           = 1. / controlRate_;
   std::chrono::milliseconds msdt(int(dt_* 1000));
-    
+  
   std::cout << "======= Loading ROS2 parameters =======" << std::endl;
   std::cout << "- Odom frame name : " << odomFrame_  << std::endl;
   std::cout << "- Robot frame name: " << robotFrame_ << std::endl;
@@ -186,12 +186,12 @@ MPCRosNode::MPCRosNode(const std::string& nodeName, const rclcpp::NodeOptions& o
   _mpc_params["W_EPSI"]     = _wEtheta;
   _mpc_params["W_V"]        = _wVel;
   _mpc_params["W_ANGVEL"]   = _wAngvel;
-  _mpc_params["W_A"]        = _wAngveld;
-  _mpc_params["W_DANGVEL"]  = _wAccel;
-  _mpc_params["W_DA"]       = _wAcceld;
+  _mpc_params["W_ACC"]      = _wAccel;
+  _mpc_params["W_ANGVELD"]  = _wAngveld;
+  _mpc_params["W_ACCD"]     = _wAcceld;
   _mpc_params["ANGVEL"]     = _maxAngvel;
-  _mpc_params["MAXTHR"]     = _maxThrottle;
-  _mpc_params["BOUND"]      = _boundValue;
+  _mpc_params["MAXACC"]     = _maxThrottle;
+  _mpc_params["BOUNDV"]     = _boundValue;
   auto _mpc = std::make_shared<MPC>(_mpc_params);
 }
 
@@ -376,11 +376,12 @@ void MPCRosNode::calculateControl(void)
       state << 0, 0, 0, linV, cte, eTheta;
     }
 
-    // Solve MPC Problem
-    std::vector<double> mpc_results = _mpc.solve(state, coeffs);
-    angularW = mpc_results[0];  // Angular velocity(rad/s)
-    throttle = mpc_results[1];  // Acceleration
-    linV += throttle * dt_;     // Linear velocity
+    // Init output speed vector and solve MPC problem
+    std::vector<double> speedsVec(2);
+    _mpc.solve(state, speedsVec, coeffs);
+    angularW = speedsVec[0];  // Angular velocity(rad/s)
+    throttle = speedsVec[1];  // Acceleration
+    linV += throttle * dt_;   // Linear velocity
     if (linV >= maxSpeed_)
       linV = maxSpeed_;
     if(linV <= 0.0)
