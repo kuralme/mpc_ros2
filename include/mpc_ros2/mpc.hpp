@@ -35,24 +35,19 @@
 
 namespace MpcRos
 {
-typedef CPPAD_TESTVECTOR(CppAD::AD<double>) ADvector;
-
 class MPC
 {
   public:
     MPC();
     MPC(const std::map<std::string, double> &params);
     void solve(Eigen::VectorXd state, std::vector<double>& outVec, Eigen::VectorXd coeffs);
-    void operator()(ADvector& fg, const ADvector& vars, Eigen::VectorXd coeffs);
-
-  private:
-    double _dt, _refEtheta, _maxAngvel, _maxAccel, _boundValue;
-    size_t _mpcStepsize, _refCte, _refVel, _wCte,
-     _wEtheta, _wVel, _wAngvel, _wAccel, _wAngveld, _wAcceld;
-    size_t _xStart, _yStart, _thetaStart, _vStart,
-     _cteStart, _eThetaStart, _angvelStart, _accStart;
-    CppAD::AD<double> cost_cte, cost_etheta, cost_vel;
+    std::vector<double> _mpcPx, _mpcPy;
     
+  private:
+    double _maxAngvel, _maxAccel, _boundValue;
+    size_t _mpcStepsize, _xStart, _yStart, _thetaStart, _vStart,
+     _cteStart, _eThetaStart, _angvelStart, _accelStart;
+    std::map<std::string, double> _mpcParams_;
 };
 } // namespace MpcRos
 #endif

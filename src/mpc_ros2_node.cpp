@@ -82,7 +82,6 @@ class MPCRosNode : public rclcpp::Node
 
     // MPC solver parameters
     MPC _mpc;
-    std::map<std::string, double> _mpc_params;
 };
 
 /**
@@ -142,57 +141,58 @@ MPCRosNode::MPCRosNode(const std::string& nodeName, const rclcpp::NodeOptions& o
                     goal_Itn_, 10, std::bind(&MPCRosNode::goalCallback, this, std::placeholders::_1));
   
   // Load MPC solver parameters from yaml
-  double _mpcSteps, _refCte, _refVel, _refEtheta, _wCte, _wEtheta, _wVel,
-    _wAngvel, _wAccel, _wAngveld, _wAcceld, _maxAngvel, _maxThrottle, _boundValue;
+  std::map<std::string, double> mpc_params;
+  double mpcSteps, refCte, refVel, refEtheta, wCte, wEtheta, wVel,
+    wAngvel, wAccel, wAngveld, wAcceld, maxAngvel, maxAccel, boundValue;
   
-  this->get_parameter_or<double>("mpc_steps"       , _mpcSteps   , 20.0  );
-  this->get_parameter_or<double>("mpc_ref_cte"     , _refCte     , 0.0   );
-  this->get_parameter_or<double>("mpc_ref_vel"     , _refVel     , 1.0   );
-  this->get_parameter_or<double>("mpc_ref_etheta"  , _refEtheta  , 0.0   );
-  this->get_parameter_or<double>("mpc_w_cte"       , _wCte       , 5000.0);
-  this->get_parameter_or<double>("mpc_w_etheta"    , _wEtheta    , 5000.0);
-  this->get_parameter_or<double>("mpc_w_vel"       , _wVel       , 1.0   );
-  this->get_parameter_or<double>("mpc_w_angvel"    , _wAngvel    , 100.0 );
-  this->get_parameter_or<double>("mpc_w_angvel_d"  , _wAngveld   , 10.0  );
-  this->get_parameter_or<double>("mpc_w_accel"     , _wAccel     , 50.0  );
-  this->get_parameter_or<double>("mpc_w_accel_d"   , _wAcceld    , 10.0  );
-  this->get_parameter_or<double>("mpc_max_angvel"  , _maxAngvel  , 3.0   );
-  this->get_parameter_or<double>("mpc_max_throttle", _maxThrottle, 1.0   );
-  this->get_parameter_or<double>("mpc_bound_value" , _boundValue , 1.0e3 );
+  this->get_parameter_or<double>("mpc_steps"       , mpcSteps   , 20.0  );
+  this->get_parameter_or<double>("mpc_ref_cte"     , refCte     , 0.0   );
+  this->get_parameter_or<double>("mpc_ref_vel"     , refVel     , 1.0   );
+  this->get_parameter_or<double>("mpc_ref_etheta"  , refEtheta  , 0.0   );
+  this->get_parameter_or<double>("mpc_w_cte"       , wCte       , 5000.0);
+  this->get_parameter_or<double>("mpc_w_etheta"    , wEtheta    , 5000.0);
+  this->get_parameter_or<double>("mpc_w_vel"       , wVel       , 1.0   );
+  this->get_parameter_or<double>("mpc_w_angvel"    , wAngvel    , 100.0 );
+  this->get_parameter_or<double>("mpc_w_angvel_d"  , wAngveld   , 10.0  );
+  this->get_parameter_or<double>("mpc_w_accel"     , wAccel     , 50.0  );
+  this->get_parameter_or<double>("mpc_w_accel_d"   , wAcceld    , 10.0  );
+  this->get_parameter_or<double>("mpc_max_angvel"  , maxAngvel  , 3.0   );
+  this->get_parameter_or<double>("mpc_max_throttle", maxAccel   , 1.0   );
+  this->get_parameter_or<double>("mpc_bound_value" , boundValue , 1.0e3 );
 
   std::cout << "======= Loading MPC parameters =======" << std::endl;
-  std::cout << "mpc_steps       : " << _mpcSteps    << std::endl;
-  std::cout << "mpc_ref_vel     : " << _refCte      << std::endl;
-  std::cout << "mpc_w_cte       : " << _refVel      << std::endl;
-  std::cout << "mpc_ref_etheta  : " << _refEtheta   << std::endl;
-  std::cout << "mpc_w_cte       : " << _wCte        << std::endl;
-  std::cout << "mpc_w_etheta    : " << _wEtheta     << std::endl;
-  std::cout << "mpc_w_vel       : " << _wVel        << std::endl;
-  std::cout << "mpc_w_angvel    : " << _wAngvel     << std::endl;
-  std::cout << "mpc_w_angvel_d  : " << _wAngveld    << std::endl;
-  std::cout << "mpc_w_accel     : " << _wAccel      << std::endl;
-  std::cout << "mpc_w_accel_d   : " << _wAcceld     << std::endl;
-  std::cout << "mpc_max_angvel  : " << _maxAngvel   << std::endl;
-  std::cout << "mpc_max_throttle: " << _maxThrottle << std::endl;
-  std::cout << "mpc_bound_value : " << _boundValue  << std::endl;
+  std::cout << "mpc_steps      : " << mpcSteps   << std::endl;
+  std::cout << "mpc_ref_vel    : " << refCte     << std::endl;
+  std::cout << "mpc_w_cte      : " << refVel     << std::endl;
+  std::cout << "mpc_ref_etheta : " << refEtheta  << std::endl;
+  std::cout << "mpc_w_cte      : " << wCte       << std::endl;
+  std::cout << "mpc_w_etheta   : " << wEtheta    << std::endl;
+  std::cout << "mpc_w_vel      : " << wVel       << std::endl;
+  std::cout << "mpc_w_angvel   : " << wAngvel    << std::endl;
+  std::cout << "mpc_w_angvel_d : " << wAngveld   << std::endl;
+  std::cout << "mpc_w_accel    : " << wAccel     << std::endl;
+  std::cout << "mpc_w_accel_d  : " << wAcceld    << std::endl;
+  std::cout << "mpc_max_angvel : " << maxAngvel  << std::endl;
+  std::cout << "mpc_max_accel  : " << maxAccel   << std::endl;
+  std::cout << "mpc_bound_value: " << boundValue << std::endl;
 
   // Fill MPC solver parameter map and construct the object
-  _mpc_params["DT"]         = dt_;
-  _mpc_params["STEPS"]      = _mpcSteps;
-  _mpc_params["REF_CTE"]    = _refCte;
-  _mpc_params["REF_ETHETA"] = _refVel;
-  _mpc_params["REF_V"]      = _refEtheta;
-  _mpc_params["W_CTE"]      = _wCte;
-  _mpc_params["W_EPSI"]     = _wEtheta;
-  _mpc_params["W_V"]        = _wVel;
-  _mpc_params["W_ANGVEL"]   = _wAngvel;
-  _mpc_params["W_ACC"]      = _wAccel;
-  _mpc_params["W_ANGVELD"]  = _wAngveld;
-  _mpc_params["W_ACCD"]     = _wAcceld;
-  _mpc_params["ANGVEL"]     = _maxAngvel;
-  _mpc_params["MAXACC"]     = _maxThrottle;
-  _mpc_params["BOUNDV"]     = _boundValue;
-  auto _mpc = std::make_shared<MPC>(_mpc_params);
+  mpc_params["DT"]         = dt_;
+  mpc_params["STEPS"]      = mpcSteps;
+  mpc_params["REF_CTE"]    = refCte;
+  mpc_params["REF_ETHETA"] = refVel;
+  mpc_params["REF_V"]      = refEtheta;
+  mpc_params["W_CTE"]      = wCte;
+  mpc_params["W_EPSI"]     = wEtheta;
+  mpc_params["W_V"]        = wVel;
+  mpc_params["W_ANGVEL"]   = wAngvel;
+  mpc_params["W_ACC"]      = wAccel;
+  mpc_params["W_ANGVELD"]  = wAngveld;
+  mpc_params["W_ACCD"]     = wAcceld;
+  mpc_params["ANGVEL"]     = maxAngvel;
+  mpc_params["MAXACC"]     = maxAccel;
+  mpc_params["BOUNDV"]     = boundValue;
+  auto _mpc = std::make_shared<MPC>(mpc_params);
 }
 
 /**
@@ -376,8 +376,11 @@ void MPCRosNode::calculateControl(void)
       state << 0, 0, 0, linV, cte, eTheta;
     }
 
-    // Init output speed vector and solve MPC problem
-    std::vector<double> speedsVec(2);
+    /*=============================================================
+    *                 Solve MPC problem
+    * =============================================================
+    */
+    std::vector<double> speedsVec(2); // Output speed vector 
     _mpc.solve(state, speedsVec, coeffs);
     angularW = speedsVec[0];  // Angular velocity(rad/s)
     throttle = speedsVec[1];  // Acceleration
@@ -401,15 +404,15 @@ void MPCRosNode::calculateControl(void)
     nav_msgs::msg::Path mpcTraj;
     mpcTraj.header.frame_id = robotFrame_;
     mpcTraj.header.stamp    = this->get_clock()->now();
-    // for(size_t i=0; i<_mpc.mpc_x.size(); i++)
-    // {
-    //   geometry_msgs::msg::PoseStamped mpcPose;
-    //   mpcPose.header = mpcTraj.header;
-      // mpcPose.pose.position.x = _mpc.mpc_x[i];
-      // mpcPose.pose.position.y = _mpc.mpc_y[i];
-    //   mpcPose.pose.orientation.w = 1.0;
-    //   mpcTraj.poses.push_back(mpcPose);
-    // }
+    for(size_t i=0; i<_mpc._mpcPx.size(); i++)
+    {
+      geometry_msgs::msg::PoseStamped mpcPose;
+      mpcPose.header = mpcTraj.header;
+      mpcPose.pose.position.x = _mpc._mpcPx[i];
+      mpcPose.pose.position.y = _mpc._mpcPy[i];
+      mpcPose.pose.orientation.w = 1.0;
+      mpcTraj.poses.push_back(mpcPose);
+    }
     pubMpcPath_->publish(mpcTraj);
   }
   else{
