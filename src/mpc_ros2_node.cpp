@@ -31,6 +31,7 @@
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
 #include <tf2/LinearMath/Transform.h>
+#include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <nav_msgs/msg/odometry.hpp>
@@ -57,17 +58,21 @@ class MPCRosNode : public rclcpp::Node
     void goalCallback(const geometry_msgs::msg::PoseStamped::ConstPtr& goalMsg);
     void localizationCallback(const geometry_msgs::msg::PoseWithCovarianceStamped::ConstPtr& locMsg);
     void calculateControl(void);
+    double polyeval(Eigen::VectorXd coeffs, double x);
+    Eigen::VectorXd polyfit(Eigen::VectorXd xMat, Eigen::VectorXd yMat, int order);
 
   private:
     // ROS2 node parameters
-    size_t downSampleRate_ = 10;
+    size_t downSampleRate_;
     double dt_, maxSpeed_, controlRate_, pathLength_, goalRadius_, waypointsDist_;
-    bool goalReceived_, goalReached_, pathComputed_, debugInfo_, delayMode_;
-    std::string odomPath_Otn_, mpcPath_Otn_, glbPath_Itn_, loc_Itn_, goal_Itn_;
+    bool goalReceived_, goalReached_, pathComputed_, debugInfo_, delayMode_, twist_en_;
+    std::string odomPath_Otn_, mpcPath_Otn_, twist_Otn_, glbPath_Itn_, loc_Itn_, goal_Itn_;
     std::string mapFrame_, odomFrame_, robotFrame_;
+    geometry_msgs::msg::Pose odom_;
     geometry_msgs::msg::Point goalPoint_;
-    nav_msgs::msg::Path globalPath_, mpcTraj_;
+    nav_msgs::msg::Path globalPath_;
     rclcpp::TimerBase::SharedPtr controlTimer_{nullptr};
+    rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr pubTwist_{nullptr};
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubMpcPath_{nullptr}, pubOdomPath_{nullptr};
     rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr glbPathSub_{nullptr};
     rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr locSub_{nullptr};
@@ -87,12 +92,13 @@ class MPCRosNode : public rclcpp::Node
 MPCRosNode::MPCRosNode(const std::string& nodeName, const rclcpp::NodeOptions& options)
   : Node(nodeName, options)
 {
-  // Get ROS2 parameters from yaml
+  // Load ROS2 parameters from yaml
   this->get_parameter_or<std::string>("loc_topic", loc_Itn_, "/amcl");
   this->get_parameter_or<std::string>("goal_topic", goal_Itn_, "/goal");
   this->get_parameter_or<std::string>("global_path_topic", glbPath_Itn_, "/global_plan");
   this->get_parameter_or<std::string>("odom_path_topic", odomPath_Otn_, "odom_path");
   this->get_parameter_or<std::string>("mpc_path_topic", mpcPath_Otn_, "mpc_path");
+  this->get_parameter_or<std::string>("twist_topic", twist_Otn_, "cmd_vel");
   this->get_parameter_or<std::string>("robot_frame", robotFrame_, "base_link");
   this->get_parameter_or<std::string>("odom_frame", odomFrame_, "odom");
   this->get_parameter_or<std::string>("map_frame", mapFrame_, "map");
@@ -100,8 +106,10 @@ MPCRosNode::MPCRosNode(const std::string& nodeName, const rclcpp::NodeOptions& o
   this->get_parameter_or<double>("path_length", pathLength_ , 8.);
   this->get_parameter_or<double>("goal_radius", goalRadius_ , .5);
   this->get_parameter_or<double>("control_rate", controlRate_, 10.);
-  this->get_parameter_or<bool>("delay_mode", delayMode_, "false");
-  this->get_parameter_or<bool>("debug_info", debugInfo_, "false");
+  this->get_parameter_or<size_t>("downsample_rate", downSampleRate_, 10);
+  this->get_parameter_or<bool>("delay_mode", delayMode_, "true");
+  this->get_parameter_or<bool>("debug_info", debugInfo_, "true");
+  this->get_parameter_or<bool>("publish_twist_flag", twist_en_, "true");
 
   goalReceived_ = false;
   goalReached_  = false;
@@ -122,6 +130,9 @@ MPCRosNode::MPCRosNode(const std::string& nodeName, const rclcpp::NodeOptions& o
   tfListener_   = std::make_shared<tf2_ros::TransformListener>(*tfBuffer_);
   pubOdomPath_  = this->create_publisher<nav_msgs::msg::Path>(odomPath_Otn_, 10);
   pubMpcPath_   = this->create_publisher<nav_msgs::msg::Path>(mpcPath_Otn_, 10);
+  if(twist_en_)
+    pubTwist_  = this->create_publisher<geometry_msgs::msg::Twist>(twist_Otn_, 10);
+
   controlTimer_ = this->create_wall_timer(msdt, std::bind(&MPCRosNode::calculateControl, this));
   glbPathSub_   = this->create_subscription<nav_msgs::msg::Path>(
                     glbPath_Itn_, 10, std::bind(&MPCRosNode::glPathCallback, this, std::placeholders::_1));
@@ -130,7 +141,7 @@ MPCRosNode::MPCRosNode(const std::string& nodeName, const rclcpp::NodeOptions& o
   goalSub_      = this->create_subscription<geometry_msgs::msg::PoseStamped>(
                     goal_Itn_, 10, std::bind(&MPCRosNode::goalCallback, this, std::placeholders::_1));
   
-  // Get MPC solver parameters from yaml
+  // Load MPC solver parameters from yaml
   double _mpcSteps, _refCte, _refVel, _refEtheta, _wCte, _wEtheta, _wVel,
     _wAngvel, _wAccel, _wAngveld, _wAcceld, _maxAngvel, _maxThrottle, _boundValue;
   
@@ -165,7 +176,7 @@ MPCRosNode::MPCRosNode(const std::string& nodeName, const rclcpp::NodeOptions& o
   std::cout << "mpc_max_throttle: " << _maxThrottle << std::endl;
   std::cout << "mpc_bound_value : " << _boundValue  << std::endl;
 
-  // Fill MPC solver parameter map and construct object
+  // Fill MPC solver parameter map and construct the object
   _mpc_params["DT"]         = dt_;
   _mpc_params["STEPS"]      = _mpcSteps;
   _mpc_params["REF_CTE"]    = _refCte;
@@ -196,7 +207,7 @@ rclcpp::node_interfaces::NodeBaseInterface::SharedPtr MPCRosNode::getNodeBaseInt
 
 /**
 * @brief Goal topic ROS2 subscription
-*        
+*        Updates when new goal received
 */
 void MPCRosNode::goalCallback(const geometry_msgs::msg::PoseStamped::ConstPtr& goalMsg)
 {
@@ -211,23 +222,27 @@ void MPCRosNode::goalCallback(const geometry_msgs::msg::PoseStamped::ConstPtr& g
 
 /**
 * @brief Localization ROS2 subscription
+*        Updates odometry
 *        Checks distance to the goal point
 */
 void MPCRosNode::localizationCallback(const geometry_msgs::msg::PoseWithCovarianceStamped::ConstPtr& locMsg)
 {
-    if(goalReceived_)
+  odom_ = locMsg->pose.pose;
+  odomFrame_ = locMsg->header.frame_id;
+
+  if(goalReceived_)
+  {
+    double goalDist = std::hypot(
+      goalPoint_.x - locMsg->pose.pose.position.x,
+      goalPoint_.y - locMsg->pose.pose.position.y);
+    if(goalDist < goalRadius_)
     {
-        double goalDist = std::hypot(
-          goalPoint_.x - locMsg->pose.pose.position.x,
-          goalPoint_.y - locMsg->pose.pose.position.y);
-        if(goalDist < goalRadius_)
-        {
-          goalReceived_  = false;
-          goalReached_   = true;
-          pathComputed_  = false;
-          std::cout << "Goal Reached! " << std::endl;
-        }
+      goalReached_   = true;
+      goalReceived_  = false;
+      pathComputed_  = false;
+      std::cout << "Goal Reached! " << std::endl;
     }
+  }
 }
 
 /**
@@ -239,7 +254,6 @@ void MPCRosNode::glPathCallback(const nav_msgs::msg::Path::ConstPtr& glbPathMsg)
   if(goalReceived_ && !goalReached_)
   {
     std::cout << "--PathCB--" << std::endl;
-    nav_msgs::msg::Path odomPath;
     geometry_msgs::msg::TransformStamped tf_path2odom;
     const auto pathPoses = glbPathMsg->poses;
     const auto pathFrame = glbPathMsg->header.frame_id;
@@ -281,18 +295,17 @@ void MPCRosNode::glPathCallback(const nav_msgs::msg::Path::ConstPtr& glbPathMsg)
         {
           geometry_msgs::msg::PoseStamped waypPose;
           tf2::doTransform(pathPoses[i], waypPose, tf_path2odom);
-          odomPath.poses.push_back(waypPose);
+          globalPath_.poses.push_back(waypPose);
         }
         totalLength += waypointDist;
         sample++;
     }
 
     // Publish the downsampled path if long enough
-    if (odomPath.poses.size() >= 6)
+    if (globalPath_.poses.size() >= 6)
     {
-      odomPath.header.frame_id = odomFrame_;
-      odomPath.header.stamp = this->get_clock()->now(); // will this match with each pose?
-      pubOdomPath_->publish(odomPath);
+      globalPath_.header.stamp = this->get_clock()->now(); // will this match with each pose?
+      pubOdomPath_->publish(globalPath_);
     }
     else
     {
@@ -304,46 +317,151 @@ void MPCRosNode::glPathCallback(const nav_msgs::msg::Path::ConstPtr& glbPathMsg)
 }
 
 /**
-* @brief MPC Controller loop
-*        ...
+* @brief Controller - local planner
+*        Closed loop nonlinear MPC
+*        Publishes predicted MPC trajectory and control signals
 */
 void MPCRosNode::calculateControl(void)
 {
-  geometry_msgs::msg::TransformStamped tfStamped;
-  double throttle_ = 0.0;
-  double linV_     = 0.0;
-  double angularW_ = 0.0;
+  double throttle = 0.0;
+  double linV     = 0.0;
+  double angularW = 0.0;
 
-  // std::string fromFrameRel = "map";
-  // std::string fromFrameRel = target_frame_.c_str();
-  // std::string toFrameRel = "odom";
-  // try {
-  //   rclcpp::Time now = this->get_clock()->now();
-  //   rclcpp::Time when = now - rclcpp::Duration(5, 0);
-  //   tfStamped = tfBuffer_->lookupTransform(
-  //     toFrameRel,
-  //     now,
-  //     fromFrameRel,
-  //     when,
-  //     "world",
-  //     50ms);
-  // } catch (const tf2::TransformException & ex) {
-  //   RCLCPP_INFO(
-  //     this->get_logger(), "Could not transform %s to %s: %s",
-  //     toFrameRel.c_str(), fromFrameRel.c_str(), ex.what());
-  //   return;
-  // }
+  if (goalReceived_ && !goalReached_ && pathComputed_)
+  {
+    tf2::Transform tfPose;
+    tf2::Quaternion quat;
+    tf2::fromMsg(odom_, tfPose);
+    tf2::fromMsg(odom_.orientation, quat);
 
-  //   // publish general cmd_vel 
-  //   if(_pub_twist_flag)
-  //   {
-  //     geometry_msgs::msg::Twist twistMsg;
-  //     twistMsg.linear.x  = _speed; 
-  //     twistMsg.angular.z = _w;
-  //     _pub_twist.publish(twistMsg);
-  //   }
+    double roll, pitch, yaw;
+    tf2::Matrix3x3 mat(quat);
+    mat.getRPY(roll, pitch, yaw);
 
-  // RCLCPP_INFO(this->get_logger(), "I heard: '%s'", msg.data.c_str());
+    const double cosTheta = std::cos(yaw);
+    const double sinTheta = std::sin(yaw);
+
+    const auto N = globalPath_.poses.size();
+    Eigen::VectorXd x_Robot(N);
+    Eigen::VectorXd y_Robot(N);
+
+    for(size_t i = 0; i < N; i++)
+    {
+      const double dx = globalPath_.poses[i].pose.position.x - odom_.position.x;
+      const double dy = globalPath_.poses[i].pose.position.y - odom_.position.y;
+      x_Robot[i] = dx * cosTheta + dy * sinTheta;
+      y_Robot[i] = dy * cosTheta - dx * sinTheta;
+    }
+    // Fit waypoints and evaluate the polynom
+    const auto coeffs = polyfit(x_Robot, y_Robot, 3);
+    const double cte  = polyeval(coeffs, 0.0);
+    const double eTheta = std::atan(coeffs[1]);
+
+    Eigen::VectorXd state(6);
+    if(delayMode_)
+    {
+      // Kinematic model is used to predict vehicle state at the actual moment of control (current time + delay dt)
+      const double px_act = linV * dt_;
+      const double py_act = 0;
+      const double theta_act = angularW * dt_; //(steering) theta_act = v * steering * dt / Lf;
+      const double v_act = linV + throttle * dt_; //v = v + a * dt
+      
+      const double cte_act = cte + linV * std::sin(eTheta) * dt_;
+      const double etheta_act = eTheta - theta_act;  
+      
+      state << px_act, py_act, theta_act, v_act, cte_act, etheta_act;
+    }
+    else
+    {
+      state << 0, 0, 0, linV, cte, eTheta;
+    }
+
+    // Solve MPC Problem
+    std::vector<double> mpc_results = _mpc.solve(state, coeffs);
+    angularW = mpc_results[0];  // Angular velocity(rad/s)
+    throttle = mpc_results[1];  // Acceleration
+    linV += throttle * dt_;     // Linear velocity
+    if (linV >= maxSpeed_)
+      linV = maxSpeed_;
+    if(linV <= 0.0)
+      linV = 0.0;
+
+    // Visualize output if neccessary
+    if(debugInfo_)
+    {
+      std::cout << "\n\n===== DEBUG ===== "<< std::endl;
+      // std::cout << "theta: "      << theta << std::endl;
+      // std::cout << "V: "          << v << std::endl;
+      std::cout << "coeffs: \n"   << coeffs << std::endl;
+      std::cout << "AngW: \n"     << angularW << std::endl;
+      std::cout << "Throttle: \n" << throttle << std::endl;
+      std::cout << "LinV: \n"     << linV << std::endl;
+    }
+    nav_msgs::msg::Path mpcTraj;
+    mpcTraj.header.frame_id = robotFrame_;
+    mpcTraj.header.stamp    = this->get_clock()->now();
+    // for(size_t i=0; i<_mpc.mpc_x.size(); i++)
+    // {
+    //   geometry_msgs::msg::PoseStamped mpcPose;
+    //   mpcPose.header = mpcTraj.header;
+      // mpcPose.pose.position.x = _mpc.mpc_x[i];
+      // mpcPose.pose.position.y = _mpc.mpc_y[i];
+    //   mpcPose.pose.orientation.w = 1.0;
+    //   mpcTraj.poses.push_back(mpcPose);
+    // }
+    pubMpcPath_->publish(mpcTraj);
+  }
+  else{
+    throttle = .0;
+    angularW = .0;
+    linV     = .0;
+  }
+  
+  if(twist_en_)
+  {
+    geometry_msgs::msg::Twist twistMsg;
+    twistMsg.linear.x  = linV; 
+    twistMsg.angular.z = angularW;
+    pubTwist_->publish(twistMsg);
+  }
+}
+
+/**
+* @brief Evaluate a polynomial
+*
+*/
+double MPCRosNode::polyeval(Eigen::VectorXd coeffs, double x) 
+{
+    double result = 0.0;
+    for (int i = 0; i < coeffs.size(); i++) 
+    {
+        result += coeffs[i] * pow(x, i);
+    }
+    return result;
+}
+
+/**
+* @brief Fit a polynomial
+*
+*/
+Eigen::VectorXd MPCRosNode::polyfit(Eigen::VectorXd xMat, Eigen::VectorXd yMat, int order) 
+{
+    assert(xMat.size() == yMat.size());
+    assert(order >= 1 && order <= xMat.size() - 1);
+    Eigen::MatrixXd A(xMat.size(), order + 1);
+
+    for (int i = 0; i < xMat.size(); i++)
+        A(i, 0) = 1.0;
+
+    for (int j = 0; j < xMat.size(); j++) 
+    {
+        for (int i = 0; i < order; i++) 
+            A(j, i + 1) = A(j, i) * xMat(j);
+    }
+
+    auto Q = A.householderQr();
+    auto result = Q.solve(yMat);
+    return result;
 }
 
 } // namespace MpcRos
