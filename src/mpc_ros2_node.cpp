@@ -54,9 +54,9 @@ class MPCRosNode : public rclcpp::Node
   public:
     MPCRosNode(const std::string& nodeName, const rclcpp::NodeOptions& options);
     rclcpp::node_interfaces::NodeBaseInterface::SharedPtr getNodeBaseInterface();
-    void glPathCallback(const nav_msgs::msg::Path::ConstPtr& glbPathMsg);
-    void goalCallback(const geometry_msgs::msg::PoseStamped::ConstPtr& goalMsg);
-    void localizationCallback(const geometry_msgs::msg::PoseWithCovarianceStamped::ConstPtr& locMsg);
+    void glPathCallback(const std::shared_ptr<const nav_msgs::msg::Path>& glbPathMsg);
+    void goalCallback(const std::shared_ptr<const geometry_msgs::msg::PoseStamped>& goalMsg);
+    void localizationCallback(const std::shared_ptr<const geometry_msgs::msg::PoseWithCovarianceStamped>& locMsg);
     void calculateControl(void);
     double polyeval(Eigen::VectorXd coeffs, double x);
     Eigen::VectorXd polyfit(Eigen::VectorXd xMat, Eigen::VectorXd yMat, int order);
@@ -209,7 +209,7 @@ rclcpp::node_interfaces::NodeBaseInterface::SharedPtr MPCRosNode::getNodeBaseInt
 * @brief Goal topic ROS2 subscription
 *        Updates when new goal received
 */
-void MPCRosNode::goalCallback(const geometry_msgs::msg::PoseStamped::ConstPtr& goalMsg)
+void MPCRosNode::goalCallback(const std::shared_ptr<const geometry_msgs::msg::PoseStamped>& goalMsg)
 {
   const auto& gp = goalMsg->pose.position;
   if(goalPoint_ != gp)
@@ -225,7 +225,7 @@ void MPCRosNode::goalCallback(const geometry_msgs::msg::PoseStamped::ConstPtr& g
 *        Updates odometry
 *        Checks distance to the goal point
 */
-void MPCRosNode::localizationCallback(const geometry_msgs::msg::PoseWithCovarianceStamped::ConstPtr& locMsg)
+void MPCRosNode::localizationCallback(const std::shared_ptr<const geometry_msgs::msg::PoseWithCovarianceStamped>& locMsg)
 {
   odom_ = locMsg->pose.pose;
   odomFrame_ = locMsg->header.frame_id;
@@ -249,7 +249,7 @@ void MPCRosNode::localizationCallback(const geometry_msgs::msg::PoseWithCovarian
 * @brief Global path ROS2 subscription
 *        Downsamples the global path and converts the frames
 */
-void MPCRosNode::glPathCallback(const nav_msgs::msg::Path::ConstPtr& glbPathMsg)
+void MPCRosNode::glPathCallback(const std::shared_ptr<const nav_msgs::msg::Path>& glbPathMsg)
 {
   if(goalReceived_ && !goalReached_)
   {
