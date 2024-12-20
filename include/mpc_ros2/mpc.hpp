@@ -30,7 +30,8 @@
 #include <map>
 #include <math.h>
 #include <vector>
-#include <tf2_eigen/tf2_eigen.hpp>
+#include <Eigen/Core>
+#include <Eigen/QR>
 #include <cppad/ipopt/solve.hpp>
 
 namespace MpcRos

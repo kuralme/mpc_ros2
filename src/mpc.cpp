@@ -29,6 +29,18 @@
 namespace MpcRos
 {
 
+/**
+* @brief Single Objective Function Optimization Class
+*        The FG_eval class is used to evaluate the objective function and constraints 
+*        for the optimization problem. The class is used by the CppAD library to
+*        compute the gradients of the objective function and constraints.
+*        The class is a functor that overloads the operator() method to evaluate the
+*        objective function and constraints.
+*        The class is templated on the AD type, which is the type used by CppAD to
+*        represent the independent and dependent variables.
+*        https://www.coin-or.org/CppAD/Doc/ipopt_solve.htm
+* 
+*/
 class FG_eval 
 {
   public:
@@ -111,8 +123,7 @@ class FG_eval
     }
     
     /**
-    * @brief Single Objective Optimization
-    *        Evaluates the objective function and constraints using the syntax
+    * @brief Evaluate the objective function and constraints using the syntax
     *
     *  Solvers like IPOPT require a single scalar objective to optimize.
     *  Combining individual costs into one scalar allows the solver to assess the "goodness" 
@@ -360,7 +371,7 @@ void MPC::solve(Eigen::VectorXd state, std::vector<double>& outVec, Eigen::Vecto
   // ============================================================
 
 
-  /* Options for IPOPT solver
+  /* Print options for IPOPT solver
   * NOTE: Setting sparse to true allows the solver to take advantage
   *       of sparse routines, this makes the computation MUCH FASTER. If you
   *       can uncomment 1 of these and see if it makes a difference or not but

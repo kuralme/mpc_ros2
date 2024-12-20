@@ -21,22 +21,21 @@ find_package(visualization_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
-find_package(tf2_eigen REQUIRED)
+find_package(Eigen3 REQUIRED)
 
 set(CPPAD_INCLUDE_DIRS /usr/local/include/cppad)
 set(CPPAD_LIBRARIES /usr/local/lib/libcppad_lib.so)
 set(IPOPT_LIBRARIES /usr/local/lib/libipopt.so)
 
-include_directories(include)
+include_directories(include) 
 add_library(mpc SHARED src/mpc.cpp)
 
 # Link IPOPT and CPPAD libraries
 target_include_directories(mpc PUBLIC ${CPPAD_INCLUDE_DIRS})
-target_link_libraries(mpc ${IPOPT_LIBRARIES} ${CPPAD_LIBRARIES})
-ament_target_dependencies(mpc tf2_eigen)
+target_link_libraries(mpc Eigen3::Eigen ${IPOPT_LIBRARIES} ${CPPAD_LIBRARIES})
 
 add_executable(mpc_ros2 src/mpc_ros2_node.cpp)
-ament_target_dependencies(mpc 
+ament_target_dependencies(mpc_ros2 
   rclcpp
   geometry_msgs
   sensor_msgs
