@@ -1,9 +1,3 @@
-![GitHub issues open](https://img.shields.io/github/issues/kuralme/mpc_ros2)
-![GitHub forks](https://img.shields.io/github/forks/kuralme/mpc_ros2)
-![GitHub stars](https://img.shields.io/github/stars/kuralme/mpc_ros2)
-![GitHub license](https://img.shields.io/github/license/kuralme/mpc_ros2)
-
-
 # Nonlinear Model Predictive Controller ROS2
 
 
@@ -17,29 +11,24 @@ The project integrates the [IPOPT solver](https://coin-or.github.io/Ipopt/), whi
 
 
 ### Dependencies
-1. ROS2 Humble depends:
+1. ROS2 Jazzy depends:
     ```
     rosdep install --from-paths <your/mpc_ros2/dir> -y --ignore-src
     ```
 
-2. CppAD
-    ```
-    sudo apt install cppad gfortran  
-    ```
+2. CppAD: refer to the [tutorial](https://cppad.readthedocs.io/latest/Install.html)
 
-3. Ipopt: refer to the official tutorial ["ipopt_install"](https://coin-or.github.io/Ipopt/INSTALL.html).
+3. Ipopt: refer to the official ["tutorial"](https://coin-or.github.io/Ipopt/INSTALL.html).
 
-4. Gazebo Sim ([Harmonic](https://gazebosim.org/docs/harmonic/getstarted/))
 
 ## Launch
 
-### Start MPC in simulation: 
+### Start MPC controller node:
 
 ```
 ros2 launch mpc_ros2 mpc_planner.launch.py
 ```
 
 ## TODO
+- [ ] tests on sim
 - [ ] local planner plugin
-
-
