@@ -284,8 +284,11 @@ MPC::MPC(const std::map<std::string, double> &params)
 
 /**
 * @brief MPC solver
+*        Solve the MPC problem and return the trajectory and control commands
+*        Uses the IPOPT library to solve the optimization problem
 */
-void MPC::solve(Eigen::VectorXd state, std::vector<double>& outVec, Eigen::VectorXd coeffs)
+std::tuple<std::vector<std::tuple<double, double>>, std::vector<double>>
+MPC::solve(Eigen::VectorXd state, Eigen::VectorXd coeffs)
 {
   bool ok = true;
   const double x      = state[0];
@@ -303,7 +306,7 @@ void MPC::solve(Eigen::VectorXd state, std::vector<double>& outVec, Eigen::Vecto
   *  4 * 10 + 2 * 9
   */
   size_t nConstraints = _mpcStepsize * state.size();
-  size_t nVars = nConstraints + (_mpcStepsize - 1) * outVec.size();
+  size_t nVars = nConstraints + (_mpcStepsize - 1) * 2;
   
   // Crate vectors for 
   //  - Optimization variables initial values
@@ -396,19 +399,28 @@ void MPC::solve(Eigen::VectorXd state, std::vector<double>& outVec, Eigen::Vecto
 
   // Check the results
   ok &= solution.status == CppAD::ipopt::solve_result<Dvector>::success;
+  if (!ok) {
+    std::cerr << "MPC solve failed!" << std::endl;
+    return {{}, {}}; // Return empty results in case of failure
+  }
+
   auto cost = solution.obj_value;
+  std::cout << "-----------------------------------------------" << std::endl;
   std::cout << "------------ Total Cost(solution): " << cost << "------------" << std::endl;
   std::cout << "-----------------------------------------------" << std::endl;
 
-  this->_mpcPx = {};
-  this->_mpcPy = {};
-  for (size_t i = 0; i < _mpcStepsize; i++)
-  {
-    this->_mpcPx.push_back(solution.x[_xStart + i]);
-    this->_mpcPy.push_back(solution.x[_yStart + i]);
+  std::vector<std::tuple<double, double>> mpcTraj;
+  for (size_t i = 0; i < _mpcStepsize; i++) {
+    double x = solution.x[_xStart + i];
+    double y = solution.x[_yStart + i];
+    mpcTraj.emplace_back(x, y);
   }
-  outVec[0] = solution.x[_angvelStart];
-  outVec[1] = solution.x[_accelStart];
+
+  std::vector<double> controlCommands;
+  controlCommands.push_back(solution.x[_angvelStart]);
+  controlCommands.push_back(solution.x[_accelStart]);
+
+  return {mpcTraj, controlCommands};
 }
 
 } // namespace MpcRos

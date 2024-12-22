@@ -30,6 +30,7 @@
 #include <map>
 #include <math.h>
 #include <vector>
+#include <tuple>
 #include <Eigen/Core>
 #include <Eigen/QR>
 #include <cppad/ipopt/solve.hpp>
@@ -41,8 +42,8 @@ class MPC
   public:
     MPC();
     MPC(const std::map<std::string, double> &params);
-    void solve(Eigen::VectorXd state, std::vector<double>& outVec, Eigen::VectorXd coeffs);
-    std::vector<double> _mpcPx, _mpcPy;
+    std::tuple<std::vector<std::tuple<double, double>>, std::vector<double>>
+     solve(Eigen::VectorXd state, Eigen::VectorXd coeffs);
     
   private:
     double _maxAngvel, _maxAccel, _boundValue;
